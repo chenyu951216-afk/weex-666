@@ -19,9 +19,12 @@ from flask import Flask, jsonify, request as freq
 from flask_cors import CORS
 
 # ============== 設定區 ==============
-API_KEY    = "weex_daaae7ef113a0c31629162734b86c26d"
-SECRET_KEY = "70597e9e9359e4c9b01d86982b9385a3d381f83ea1c0ed599b2f2c5e6a48a9bd"
-PASSPHRASE = ""          # 必填！建立 API 時設定的 Passphrase
+import os
+
+API_KEY    = os.getenv('WEEX_API_KEY', 'weex_daaae7ef113a0c31629162734b86c26d')
+SECRET_KEY = os.getenv('WEEX_SECRET_KEY', '70597e9e9359e4c9b01d86982b9385a3d381f83ea1c0ed599b2f2c5e6a48a9bd')
+PASSPHRASE = os.getenv('WEEX_PASSPHRASE', 'Jeff5466')
+
 
 BASE_URL         = "https://api-contract.weex.com"
 LEVERAGE         = 200
