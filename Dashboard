@@ -375,17 +375,24 @@ header{
 </div>
 
 <!-- 底部說明 -->
-<div style="margin-top:12px;padding:14px 16px;background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--yellow);font-size:11px;color:var(--dim);line-height:2">
-  <b style="color:var(--yellow)">安裝：</b><span style="color:var(--text)">pip install flask flask-cors requests</span>　
-  <b style="color:var(--yellow)">啟動：</b><span style="color:var(--text)">填入 PASSPHRASE → python weex_bot.py → 打開此頁面 → 點 ▶ 啟動</span>　
-  <b style="color:var(--red)">⚠ 200x槓桿極高風險，請先用小資金測試！圖片中的API金鑰已暴露，請立即到WEEX刪除並重新建立。</b>
+<div style="margin-top:12px;padding:14px 16px;background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--yellow);font-size:11px;color:var(--dim);line-height:2.2">
+  <b style="color:var(--yellow);font-size:12px">⚡ 正確啟動方式（全部在自己電腦跑）</b><br>
+  <b style="color:var(--accent)">① 安裝：</b><span style="color:var(--text)">pip install flask flask-cors requests</span><br>
+  <b style="color:var(--accent)">② 設定：</b><span style="color:var(--text)">開啟 weex_bot.py → 填入 PASSPHRASE（第24行）→ 填入新的 API_KEY / SECRET_KEY</span><br>
+  <b style="color:var(--accent)">③ 啟動：</b><span style="color:var(--text)">python weex_bot.py</span><br>
+  <b style="color:var(--accent)">④ 開啟：</b><span style="color:var(--text)">瀏覽器輸入 <b style="color:var(--green)">http://localhost:5000</b>（儀表板已內建，不需要另外開 HTML）</span><br>
+  <b style="color:var(--accent)">⑤ 診斷：</b><span style="color:var(--text)">若連不到 WEEX API，先開 <b style="color:var(--green)">http://localhost:5000/api/ping</b> 查看詳細原因</span><br>
+  <b style="color:var(--red)">⚠ 勿從 Zeabur/雲端開啟儀表板，必須從 localhost:5000 開啟才能正確連接後端</b><br>
+  <b style="color:var(--red)">⚠ 200x槓桿極高風險！圖片中的API金鑰已暴露，請立即到WEEX刪除並重新建立新的金鑰。</b>
 </div>
 
 </div>
 
 <script>
-const API = 'http://localhost:5000';
+// ★ 相對路徑：無論部署在哪裡都能正確連到後端
+const API = '';   // 空字串 = 與當前頁面同 origin
 let scanData = {};
+let _offlineCount = 0;
 
 // ── tab 切換 ──
 function switchTab(name, el) {
@@ -395,10 +402,25 @@ function switchTab(name, el) {
   document.getElementById('tab-' + name).classList.add('active');
 }
 
+// ── 連線診斷 ──
+async function doPing() {
+  try {
+    const d = await (await fetch('/api/ping', {cache:'no-store'})).json();
+    const warn = (d.warnings || []).join(' | ');
+    if (warn) {
+      document.getElementById('eLog').innerHTML =
+        `<div class="ei" style="color:var(--yellow)">${warn}</div>` +
+        document.getElementById('eLog').innerHTML;
+    }
+    return d;
+  } catch(e) { return null; }
+}
+
 // ── 主資料刷新 ──
 async function fetchStatus() {
   try {
-    const d = await (await fetch(API + '/api/status')).json();
+    const d = await (await fetch(API + '/api/status', {cache:'no-store'})).json();
+    _offlineCount = 0;
     updateHeader(d);
     updateMetrics(d);
     updateScanProgress(d);
@@ -409,21 +431,32 @@ async function fetchStatus() {
     renderAllSignals(scanData);
     renderCoinChips(d.top50 || [], d.current_scan, d.positions || {}, scanData);
   } catch(e) {
-    document.getElementById('htext').textContent = 'API OFFLINE';
+    _offlineCount++;
+    document.getElementById('htext').textContent =
+      _offlineCount === 1 ? '連線中...' : 'API OFFLINE';
     document.getElementById('dot').classList.remove('on');
+    if (_offlineCount === 2) {
+      // 二次失敗才做 ping 診斷
+      const ping = await doPing();
+      if (!ping) {
+        document.getElementById('eLog').innerHTML =
+          `<div class="ei"><span class="et">${new Date().toLocaleTimeString()}</span>` +
+          `無法連接後端。請確認 python weex_bot.py 正在執行，並從 <b>http://localhost:5000</b> 開啟此頁面</div>`;
+      }
+    }
   }
 }
 
 async function fetchTrades() {
   try {
-    const trades = await (await fetch(API + '/api/trades')).json();
+    const trades = await (await fetch(API + '/api/trades', {cache:'no-store'})).json();
     renderTrades(trades);
   } catch(e) {}
 }
 
 async function fetchErrors() {
   try {
-    const errs = await (await fetch(API + '/api/errors')).json();
+    const errs = await (await fetch(API + '/api/errors', {cache:'no-store'})).json();
     renderErrors(errs);
   } catch(e) {}
 }
@@ -610,7 +643,7 @@ function renderErrors(errs) {
 async function closePos(sym) {
   if (!confirm(`確定手動平倉 ${sym}？`)) return;
   try {
-    const r = await (await fetch(API + '/api/close_position', {
+    const r = await (await fetch('/api/close_position', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({symbol: sym})
@@ -622,15 +655,15 @@ async function closePos(sym) {
 
 async function startBot() {
   try {
-    const r = await (await fetch(API + '/api/start', {method: 'POST'})).json();
+    const r = await (await fetch('/api/start', {method: 'POST'})).json();
     alert(r.msg);
     fetchStatus();
-  } catch(e) { alert('無法連接後端！請先執行: python weex_bot.py'); }
+  } catch(e) { alert('無法連接後端！\n請確認 python weex_bot.py 正在運行\n並透過 http://localhost:5000 開啟此頁面'); }
 }
 
 async function stopBot() {
   try {
-    const r = await (await fetch(API + '/api/stop', {method: 'POST'})).json();
+    const r = await (await fetch('/api/stop', {method: 'POST'})).json();
     alert(r.msg);
   } catch(e) { alert('無法連接後端'); }
 }
