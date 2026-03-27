@@ -31,7 +31,7 @@ OPEN_THRESHOLD  = 35          # ★ 開倉閾值降低→更頻繁 (原65→40)
 CLOSE_THRESHOLD = 20          # ★ 平倉閾值 (原55→35)
 ATR_MIN_PCT     = 0.02        # ★ ATR 門檻降低 (原0.04→0.02)
 MAX_POSITIONS   = 5           # 最多同時 5 倉
-PORT            = int(os.environ.get("PORT", "5000"))
+PORT = int(os.environ.get("PORT", "8080"))
 
 FAST_EMA=9; SLOW_EMA=21; RSI_P=14; MACD_F=12; MACD_S=26
 MACD_SIG=9;  BB_P=20;   BB_STD=2.0; ATR_P=14; VOL_MA_P=20
