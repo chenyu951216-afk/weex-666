@@ -792,6 +792,26 @@ def _post(path, body):
     except Exception as e:
         log.warning(f"POST {path} err:{e}"); return {}
 
+SYMBOL_INFO = {}
+
+def load_symbol_info():
+    global SYMBOL_INFO
+    try:
+        data = _get("/capi/v3/exchangeInfo")
+        if data and "symbols" in data:
+            for sym in data["symbols"]:
+                symbol = sym["symbol"]
+                filters = {f["filterType"]: f for f in sym.get("filters", [])}
+                SYMBOL_INFO[symbol] = {
+                    "stepSize": float(filters.get("LOT_SIZE", {}).get("stepSize", 1)),
+                    "tickSize": float(filters.get("PRICE_FILTER", {}).get("tickSize", 0.01))
+                }
+            log.info(f"已載入 {len(SYMBOL_INFO)} 個交易對資訊")
+    except Exception as e:
+        log.error(f"載入交易對資訊失敗: {e}")
+
+# 程式啟動時呼叫
+load_symbol_info()
 
 # ── 市場資料 ──
 def get_top50():
@@ -970,11 +990,19 @@ def compute_signals(symbol, klines):
 def calc_qty(balance, price, symbol):
     notional = balance * RISK_PCT * LEVERAGE
     qty = notional / price
-    if price>10000: qty=max(0.001,round(qty,3))
-    elif price>100: qty=max(0.01, round(qty,2))
-    elif price>1:   qty=max(0.1,  round(qty,1))
-    else:           qty=max(1,    int(qty))
+    
+    # 簡單舍入邏輯（根據價格決定精度）
+    if price > 10000:
+        qty = max(0.001, round(qty, 3))
+    elif price > 100:
+        qty = max(0.01, round(qty, 2))
+    elif price > 1:
+        qty = max(0.1, round(qty, 1))
+    else:
+        qty = max(1, int(qty))
+    
     return str(qty)
+
 
 def open_order(symbol, side, qty, tp, sl):
     ensure_leverage(symbol)
@@ -992,21 +1020,36 @@ def open_order(symbol, side, qty, tp, sl):
     return result
 
 
-def close_order(symbol, pos):
-    amt=float(pos.get("positionAmt",0))
-    if abs(amt)<=0: return {}
-    side="SELL" if amt>0 else "BUY"
-    pos_side="LONG" if side=="SELL" else "SHORT"
+def open_order(symbol, side, qty, tp, sl):
+    ensure_leverage(symbol)
+    pos_side = "LONG" if side == "BUY" else "SHORT"
+    
+    # 舍入 TP/SL 價格（根據價格決定精度）
+    if tp > 10000:
+        tp = round(tp, 2)
+        sl = round(sl, 2)
+    elif tp > 100:
+        tp = round(tp, 3)
+        sl = round(sl, 3)
+    elif tp > 1:
+        tp = round(tp, 4)
+        sl = round(sl, 4)
+    else:
+        tp = round(tp, 6)
+        sl = round(sl, 6)
+    
     payload = {
-        "symbol":symbol, "side":side, "positionSide":pos_side,
-        "type":"MARKET", "quantity":str(abs(round(amt,3))),
-        "newClientOrderId":f"cls_{uuid.uuid4().hex[:14]}",
-        "reduceOnly":True,
+        "symbol": symbol, "side": side, "positionSide": pos_side,
+        "type": "MARKET", "quantity": qty,
+        "newClientOrderId": f"bot_{uuid.uuid4().hex[:14]}",
+        "tpTriggerPrice": str(tp), "slTriggerPrice": str(sl),
+        "TpWorkingType": "MARK_PRICE", "SlWorkingType": "MARK_PRICE",
     }
-    log.info(f"[{symbol}] 平倉請求: {json.dumps(payload)}")
+    log.info(f"[{symbol}] 下單請求: {json.dumps(payload)}")
     result = _post("/capi/v3/order", payload)
-    log.info(f"[{symbol}] 平倉響應: {json.dumps(result)}")
+    log.info(f"[{symbol}] API 響應: {json.dumps(result)}")
     return result
+
 
 
 # ── 持倉監控執行緒 ──
