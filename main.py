@@ -979,25 +979,34 @@ def calc_qty(balance, price, symbol):
 def open_order(symbol, side, qty, tp, sl):
     ensure_leverage(symbol)
     pos_side="LONG" if side=="BUY" else "SHORT"
-    return _post("/capi/v3/order",{
+    payload = {
         "symbol":symbol, "side":side, "positionSide":pos_side,
         "type":"MARKET", "quantity":qty,
         "newClientOrderId":f"bot_{uuid.uuid4().hex[:14]}",
         "tpTriggerPrice":str(round(tp,6)), "slTriggerPrice":str(round(sl,6)),
         "TpWorkingType":"MARK_PRICE", "SlWorkingType":"MARK_PRICE",
-    })
+    }
+    log.info(f"[{symbol}] 下單請求: {json.dumps(payload)}")
+    result = _post("/capi/v3/order", payload)
+    log.info(f"[{symbol}] API 響應: {json.dumps(result)}")
+    return result
+
 
 def close_order(symbol, pos):
     amt=float(pos.get("positionAmt",0))
     if abs(amt)<=0: return {}
     side="SELL" if amt>0 else "BUY"
     pos_side="LONG" if side=="SELL" else "SHORT"
-    return _post("/capi/v3/order",{
+    payload = {
         "symbol":symbol, "side":side, "positionSide":pos_side,
         "type":"MARKET", "quantity":str(abs(round(amt,3))),
         "newClientOrderId":f"cls_{uuid.uuid4().hex[:14]}",
         "reduceOnly":True,
-    })
+    }
+    log.info(f"[{symbol}] 平倉請求: {json.dumps(payload)}")
+    result = _post("/capi/v3/order", payload)
+    log.info(f"[{symbol}] 平倉響應: {json.dumps(result)}")
+    return result
 
 
 # ── 持倉監控執行緒 ──
@@ -1251,7 +1260,8 @@ def api_close_pos():
     with _lock: pos=state["positions"].get(sym)
     if not pos: return jsonify({"ok":False,"msg":f"{sym} 無持倉"})
     result=close_order(sym,pos)
-    if result.get("success") or result.get("orderId"):
+    if result.get("success") or result.get("orderId") or result.get("code") == "0" or "orderId" in str(result):
+
         with _lock: state["positions"].pop(sym,None)
         return jsonify({"ok":True,"msg":f"{sym} 平倉送出"})
     return jsonify({"ok":False,"msg":f"失敗:{result}"})
