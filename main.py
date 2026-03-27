@@ -15,9 +15,9 @@ from flask import Flask, jsonify, request as freq, Response
 from flask_cors import CORS
 
 # ── 從環境變數讀取（Zeabur Variables 設定）──
-API_KEY    = os.environ.get("WEEX_API_KEY",    "weex_daaae7ef113a0c31629162734b86c26d")
-SECRET_KEY = os.environ.get("WEEX_SECRET_KEY", "70597e9e9359e4c9b01d86982b9385a3d381f83ea1c0ed599b2f2c5e6a48a9bd")
-PASSPHRASE = os.environ.get("WEEX_PASSPHRASE", "Jeff5466")
+API_KEY    = os.environ.get("WEEX_API_KEY",    "")
+SECRET_KEY = os.environ.get("WEEX_SECRET_KEY", "")
+PASSPHRASE = os.environ.get("WEEX_PASSPHRASE", "")
 
 BASE_URL        = "https://api-contract.weex.com"
 LEVERAGE        = 200
