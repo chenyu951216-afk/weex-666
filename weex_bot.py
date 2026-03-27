@@ -15,48 +15,42 @@ import hmac, hashlib, base64, time, json, math, uuid, logging, threading
 import requests
 from datetime import datetime
 from collections import deque
-from flask import Flask, jsonify, request as freq
+from flask import Flask, jsonify, request as freq, send_file, Response
 from flask_cors import CORS
-
-# ============== 設定區 ==============
 import os
 
-API_KEY    = os.getenv('WEEX_API_KEY', 'weex_daaae7ef113a0c31629162734b86c26d')
+# ============================================================
+# 雲端環境變數設定（Zeabur Variables 頁面新增）：
+#   WEEX_API_KEY      你的 APIKey
+#   WEEX_SECRET_KEY   你的 SecretKey
+#   WEEX_PASSPHRASE   你的 Passphrase
+# ============================================================
+API_KEY = os.getenv('WEEX_API_KEY', 'weex_daaae7ef113a0c31629162734b86c26d')
 SECRET_KEY = os.getenv('WEEX_SECRET_KEY', '70597e9e9359e4c9b01d86982b9385a3d381f83ea1c0ed599b2f2c5e6a48a9bd')
 PASSPHRASE = os.getenv('WEEX_PASSPHRASE', 'Jeff5466')
 
-
 BASE_URL         = "https://api-contract.weex.com"
-LEVERAGE         = 200
-RISK_PCT         = 0.05        # 每筆倉位佔帳戶 5%
-INTERVAL         = "1m"        # K線週期
-TOP_N            = 50          # 掃描成交量前 N 名
-COIN_SCAN_DELAY  = 0.2         # 幣與幣掃描間隔 (秒)
-ROUND_INTERVAL   = 60          # 輪與輪間隔 (秒)
-POSITION_CHECK   = 5           # 持倉監控間隔 (秒)
-OPEN_THRESHOLD   = 65          # 開倉訊號閾值
-CLOSE_THRESHOLD  = 55          # 反向平倉閾值
-ATR_MIN_PCT      = 0.04        # ATR 最低波動過濾
-MAX_POSITIONS    = 5           # 最多同時持倉數
+LEVERAGE         = int(os.environ.get("WEEX_LEVERAGE",        "200"))
+RISK_PCT         = float(os.environ.get("WEEX_RISK_PCT",      "0.05"))
+INTERVAL         = os.environ.get("WEEX_INTERVAL",            "1m")
+TOP_N            = int(os.environ.get("WEEX_TOP_N",           "50"))
+COIN_SCAN_DELAY  = float(os.environ.get("WEEX_COIN_DELAY",    "0.2"))
+ROUND_INTERVAL   = int(os.environ.get("WEEX_ROUND_INTERVAL",  "60"))
+POSITION_CHECK   = int(os.environ.get("WEEX_POS_CHECK",       "5"))
+OPEN_THRESHOLD   = int(os.environ.get("WEEX_OPEN_THRESHOLD",  "65"))
+CLOSE_THRESHOLD  = int(os.environ.get("WEEX_CLOSE_THRESHOLD", "55"))
+ATR_MIN_PCT      = float(os.environ.get("WEEX_ATR_MIN",       "0.04"))
+MAX_POSITIONS    = int(os.environ.get("WEEX_MAX_POSITIONS",   "5"))
+PORT             = int(os.environ.get("PORT", "5000"))
 LOG_FILE         = "weex_bot.log"
 
-# 技術指標參數
-FAST_EMA  = 9
-SLOW_EMA  = 21
-RSI_P     = 14
-MACD_F    = 12
-MACD_S    = 26
-MACD_SIG  = 9
-BB_P      = 20
-BB_STD    = 2.0
-ATR_P     = 14
-VOL_MA_P  = 20
-# ====================================
+FAST_EMA=9; SLOW_EMA=21; RSI_P=14; MACD_F=12; MACD_S=26
+MACD_SIG=9; BB_P=20; BB_STD=2.0; ATR_P=14; VOL_MA_P=20
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler(LOG_FILE, encoding="utf-8"), logging.StreamHandler()]
+    handlers=[logging.StreamHandler()]
 )
 log = logging.getLogger(__name__)
 
@@ -733,17 +727,82 @@ def api_close_pos():
 
 @app.route("/")
 def index():
-    return "WEEX Bot v3.0 — Open dashboard.html"
+    """直接 serve dashboard.html，解決跨域問題"""
+    # 找 dashboard.html：同目錄 或 上層目錄
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html"),
+        "dashboard.html",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return send_file(path)
+    # fallback：內嵌簡易頁面
+    return Response("""<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>WEEX Bot</title>
+<style>body{background:#020510;color:#00d4ff;font-family:monospace;padding:40px;}</style>
+</head><body>
+<h2>⚠ 找不到 dashboard.html</h2>
+<p>請確認 dashboard.html 和 weex_bot.py 在同一個資料夾</p>
+<p>API 狀態: <a href="/api/ping" style="color:#00ff88">/api/ping</a></p>
+</body></html>""", mimetype="text/html")
+
+@app.route("/api/ping")
+def api_ping():
+    """連線診斷端點"""
+    weex_ok = False
+    weex_msg = ""
+    try:
+        r = requests.get("https://api-contract.weex.com/capi/v3/market/time",
+                         timeout=5)
+        weex_ok = r.status_code == 200
+        weex_msg = f"HTTP {r.status_code}"
+    except Exception as e:
+        weex_msg = str(e)
+
+    passphrase_set = bool(PASSPHRASE and PASSPHRASE.strip())
+    api_key_set    = bool(API_KEY and not API_KEY.startswith("weex_daaae"))
+
+    return jsonify({
+        "bot_alive":      True,
+        "weex_reachable": weex_ok,
+        "weex_msg":       weex_msg,
+        "passphrase_set": passphrase_set,
+        "api_key_set":    api_key_set,
+        "timestamp":      datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "warnings": [
+            w for w in [
+                "" if weex_ok      else "❌ 無法連接 WEEX API — 請確認網路/防火牆",
+                "" if passphrase_set else "❌ PASSPHRASE 未填入",
+                "" if api_key_set    else "⚠ API_KEY 看起來是舊的，請更換",
+            ] if w
+        ]
+    })
+
+# ── 自動啟動診斷 ──
+log.info("=" * 50)
+log.info("WEEX 量化機器人 v3.2 雲端版 啟動中...")
+log.info(f"PORT={PORT}  LEVERAGE={LEVERAGE}x  RISK={RISK_PCT*100}%  TOP_N={TOP_N}")
+
+if not API_KEY:
+    log.error("❌ WEEX_API_KEY 環境變數未設定！")
+elif not SECRET_KEY:
+    log.error("❌ WEEX_SECRET_KEY 環境變數未設定！")
+elif not PASSPHRASE:
+    log.error("❌ WEEX_PASSPHRASE 環境變數未設定！")
+else:
+    log.info("✅ API 金鑰已從環境變數載入")
+
+try:
+    r = requests.get("https://api-contract.weex.com/capi/v3/market/time", timeout=8)
+    log.info(f"✅ WEEX API 連線正常 (HTTP {r.status_code})")
+except Exception as e:
+    log.error(f"❌ WEEX API 連線失敗: {e}")
+
+log.info(f"儀表板網址: https://你的Zeabur網域/")
+log.info("=" * 50)
 
 if __name__ == "__main__":
-    print("╔══════════════════════════════════════════════╗")
-    print("║   WEEX 量化機器人 v3.0  多幣掃描版          ║")
-    print("║   掃描: TOP50 成交量合約幣種                 ║")
-    print("║   節奏: 幣間 0.2s | 輪間 60s                ║")
-    print("║   持倉: 獨立執行緒每 5s 追蹤，即時進出場    ║")
-    print("║   API : http://localhost:5000                ║")
-    print("╠══════════════════════════════════════════════╣")
-    print("║   填入 PASSPHRASE 後執行此檔即可             ║")
-    print("║   ⚠  200x 槓桿極高風險，請謹慎使用          ║")
-    print("╚══════════════════════════════════════════════╝")
-    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
+else:
+    # Gunicorn / Zeabur 直接 import 時也能跑
+    pass
