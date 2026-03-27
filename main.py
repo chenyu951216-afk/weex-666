@@ -991,33 +991,48 @@ def calc_qty(balance, price, symbol):
     notional = balance * RISK_PCT * LEVERAGE
     qty = notional / price
     
-    # 簡單舍入邏輯（根據價格決定精度）
-    if price > 10000:
-        qty = max(0.001, round(qty, 3))
-    elif price > 100:
-        qty = max(0.01, round(qty, 2))
-    elif price > 1:
-        qty = max(0.1, round(qty, 1))
+    # 使用 stepSize 驗證
+    step_size = SYMBOL_INFO.get(symbol, {}).get("stepSize", 1)
+    
+    # 根據 stepSize 舍入
+    if step_size >= 1:
+        qty = max(step_size, int(qty / step_size) * step_size)
     else:
-        qty = max(1, int(qty))
+        # 計算小數位數
+        decimal_places = len(str(step_size).split('.')[-1]) if '.' in str(step_size) else 0
+        qty = max(step_size, round(qty / step_size) * step_size)
+        qty = round(qty, decimal_places)
     
     return str(qty)
 
-
-def open_order(symbol, side, qty, tp, sl):
-    ensure_leverage(symbol)
-    pos_side="LONG" if side=="BUY" else "SHORT"
-    payload = {
-        "symbol":symbol, "side":side, "positionSide":pos_side,
-        "type":"MARKET", "quantity":qty,
-        "newClientOrderId":f"bot_{uuid.uuid4().hex[:14]}",
-        "tpTriggerPrice":str(round(tp,6)), "slTriggerPrice":str(round(sl,6)),
-        "TpWorkingType":"MARK_PRICE", "SlWorkingType":"MARK_PRICE",
-    }
-    log.info(f"[{symbol}] 下單請求: {json.dumps(payload)}")
-    result = _post("/capi/v3/order", payload)
-    log.info(f"[{symbol}] API 響應: {json.dumps(result)}")
-    return result
+def close_order(symbol, position):
+    """平倉指定持倉"""
+    try:
+        amt = float(position.get("positionAmt", 0))
+        if amt == 0:
+            return {"success": False, "msg": "持倉數量為 0"}
+        
+        side = "SELL" if amt > 0 else "BUY"
+        qty = str(abs(amt))
+        pos_side = "LONG" if amt > 0 else "SHORT"
+        
+        payload = {
+            "symbol": symbol,
+            "side": side,
+            "positionSide": pos_side,
+            "type": "MARKET",
+            "quantity": qty,
+            "newClientOrderId": f"bot_{uuid.uuid4().hex[:14]}",
+        }
+        
+        log.info(f"[{symbol}] 平倉請求: {json.dumps(payload)}")
+        result = _post("/capi/v3/order", payload)
+        log.info(f"[{symbol}] 平倉響應: {json.dumps(result)}")
+        
+        return result
+    except Exception as e:
+        log.error(f"[{symbol}] 平倉異常: {e}")
+        return {"success": False, "msg": str(e)}
 
 
 def open_order(symbol, side, qty, tp, sl):
